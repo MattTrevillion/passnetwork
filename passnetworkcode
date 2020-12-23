@@ -1,0 +1,86 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.patches import Arc
+import statistics
+from mplsoccer.pitch import Pitch
+import matplotlib
+from matplotlib.colors import to_rgba
+
+df = pd.read_csv("EventData.csv")
+
+#By Team
+df = df[df["teamId"]==30]
+
+#Better Measure of Time
+df["newsecond"]=60*df["minute"]+df["second"]
+df.sort_values(by=['newsecond'])
+
+#Passer and Receipient
+df['passer'] = df['playerId']
+df['recipient'] = df['passer'].shift(-1)
+
+#Filtering Before First Substitution
+subs = df.loc[(df['type/displayName']=="SubstitutionOff")]
+subtimes = subs["newsecond"]
+firstsub = subtimes.min()
+df = df.loc[(df['newsecond']<firstsub)]
+
+#Filter Successful Passes
+df = df[(df["type/displayName"]=="Pass") & 
+        (df["outcomeType/displayName"]=="Successful")]
+
+#Median Location and Pass Count
+passer_avg = df.groupby('passer').agg({'x': ['median'], 'y': ['median','count']})
+passer_avg.columns = ['x', 'y', 'count']
+passer_avg.index = passer_avg.index.astype(int)
+
+#Between Passer and Recipient
+passes_between = df.groupby(['passer', 'recipient']).id.count().reset_index()
+passes_between.rename({'id': 'pass_count'}, axis='columns', inplace=True)
+
+passes_between = passes_between.merge(passer_avg, left_on='passer', right_index=True)
+passes_between = passes_between.merge(passer_avg, left_on='recipient', right_index=True,
+                                      suffixes=['', '_end'])
+
+#Minimum No. of Passes
+#passes_between = passes_between.loc[(passes_between['pass_count']>2)]
+
+#Scaling for StatsBomb
+passes_between['x']=passes_between['x']*1.2
+passes_between['y']=passes_between['y']*0.8
+passer_avg['x']=passer_avg['x']*1.2
+passer_avg['y']=passer_avg['y']*0.8
+passes_between['x_end']=passes_between['x_end']*1.2
+passes_between['y_end']=passes_between['y_end']*0.8
+
+#Width Variable
+yo = passes_between.pass_count / passes_between.pass_count.max()
+
+#WITHIN .PITCH THERE IS NO NEED TO FLIP X AND Y
+
+#Plot Pitch
+fig, ax = plt.subplots()
+fig.set_facecolor('#1B1B1B')
+fig.patch.set_facecolor('#1B1B1B')
+pitch = Pitch(pitch_type='statsbomb', orientation='vertical',
+              pitch_color='#1B1B1B', line_color='#545454',
+              constrained_layout=True, tight_layout=False)
+pitch.draw(ax=ax)
+plt.scatter(passer_avg.y, passer_avg.x, s=150, color='#FFFFFF', 
+            edgecolors="#132257", linewidth=1, alpha=1, zorder=2)
+pitch.lines(passes_between.x, passes_between.y, passes_between.x_end, 
+            passes_between.y_end, linewidth=yo*4, color='#FFFFFF', ax=ax, zorder=1)
+plt.gca().invert_xaxis()
+for index, row in passer_avg.iterrows():
+    pitch.annotate(row.name, xy=(row.x, row.y), 
+                   c='#132257', va='center', ha='center', size=8,
+                   fontfamily="Arial",ax=ax)
+plt.text(80,-12,"Positions = Median Location of Successful Passes\nLines = Pass Combinations\nLine Width = Frequency of Combination", color='#FFFFFF',
+               fontsize=5, fontfamily="Arial")
+plt.text(80,122,"Minutes 0-58 (First Substitution)", color='#FFFFFF',
+               fontsize=5, fontfamily="Arial")
+plt.text(15,122,"@trevillion_", color='#FFFFFF',
+               fontsize=5, fontfamily="Arial")
+ax.set_title("Tottenham Pass Network vs. Liverpool", 
+             fontsize=10, color="#FFFFFF", fontfamily="Arial", y=1.01)
